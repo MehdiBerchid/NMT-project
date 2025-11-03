@@ -43,15 +43,15 @@ class NMT(nn.Module):
         self.vocab = vocab
 
         # default values
-        self.post_embed_cnn = None
-        self.encoder = None
-        self.decoder = None
-        self.h_projection = None
-        self.c_projection = None
-        self.att_projection = None
-        self.combined_output_projection = None
-        self.target_vocab_projection = None
-        self.dropout = None
+        self.post_embed_cnn = nn.Conv1d(in_channels= embed_size,out_channels= embed_size,kernel_size= 2 ,padding= "same" )
+        self.encoder = nn.LSTM(input_size= embed_size, hidden_size= self.hidden_size,bidirectional=True)
+        self.decoder = nn.LSTMCell(input_size= embed_size + self.hidden_size , hidden_size= self.hidden_size)
+        self.h_projection = nn.Linear(in_features=2  * self.hidden_size, out_features=self.hidden_size, bias=False)
+        self.c_projection = nn.Linear(in_features= 2*self.hidden_size, out_features=  self.hidden_size,bias= False)
+        self.att_projection = nn.Linear(in_features=2*self.hidden_size, out_features=self.hidden_size,bias=False)
+        self.combined_output_projection = nn.Linear(in_features=3*self.hidden_size, out_features= self.hidden_size, bias= False)
+        self.target_vocab_projection = nn.Linear(in_features=self.hidden_size,out_features= len(vocab.tgt) )
+        self.dropout = nn.Dropout(p = self.dropout_rate)
         # For sanity check only, not relevant to implementation
         self.gen_sanity_check = False
         self.counter = 0
@@ -139,7 +139,28 @@ class NMT(nn.Module):
                                                 hidden state and cell.
         @grader_params: Ignore this parameter. It is used for grading purposes.
         """
-        enc_hiddens, dec_init_state = None, None
+        source_padded = source_padded.to(self.device)
+        X = self.model_embeddings.source(source_padded)
+        X = self.post_embed_cnn(torch.permute(X,(1,2,0)))
+        X = torch.permute(X,(2,0,1))
+        X_packed = pack_padded_sequence(X,source_lengths)
+        enc_hiddens,(last_hidden,last_cell) = self.encoder(X_packed)
+        enc_hiddens,_ = pad_packed_sequence(enc_hiddens)
+        enc_hiddens = torch.permute(enc_hiddens, (1, 0, 2))  # (b, src_len, 2h)
+
+        h_forward = last_hidden[0]   # (b, h)
+        h_backward = last_hidden[1]  # (b, h)
+        h_cat = torch.cat([h_backward, h_forward], dim=1)  # (b, 2h)
+
+        c_forward = last_cell[0]
+        c_backward = last_cell[1]
+        c_cat = torch.cat([c_backward,c_forward],dim=1)
+        (init_decoder_hidden, init_decoder_cell) = (self.h_projection(h_cat),self.c_projection(c_cat))
+        dec_init_state = (init_decoder_hidden, init_decoder_cell) 
+
+
+
+
 
         ### YOUR CODE HERE (~ 11 Lines)
         ### TODO:
